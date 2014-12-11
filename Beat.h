@@ -2,20 +2,31 @@
 #include <Audio.h>
 
 #define AVERAGE_FRAMES 200      // ticks to average audio energy for comparison against instance energy //
-#define BEAT_WAIT_INTERVAL 400  // time to wait for detection after a beat
+#define BEAT_WAIT_INTERVAL 350  // time to wait for detection after a beat
 #define BEAT_HOLD_TIME 80       // number of frames to hold a beat
-#define BEAT_DECAY_RATE  0.99   // how much to decay the beat threshold on a non-beat
-#define BEAT_MIN 0.25           // anything with a peak level lower than this will not count as a beat
+#define BEAT_DECAY_RATE  0.98   // how much to decay the beat threshold on a non-beat
+#define BEAT_MIN 0.2           // anything with a peak level lower than this will not count as a beat
 
 //Track a threshold volume level.
 //If the current volume exceeds the threshold then you have a beat. Set the new threshold to the current volume.
 //Reduce the threshold over time, using the Decay Rate.
 //Wait for the Hold Time before detecting for the next beat. This can help reduce false positives.
 
+typedef struct BeatInfo {
+  uint16_t numBeats;
+  float lastPeak;
+} BeatInfo;
+
+typedef void(*beat_callback)(BeatInfo);
+typedef void(*bpm_changed_callback)(int, int);
+
 class BeatAnalyzer {
   public:
-    BeatAnalyzer(AudioAnalyzePeak* _peakAnalyzer) {
+    BeatInfo beatInfo;
+    
+    BeatAnalyzer(AudioAnalyzePeak* _peakAnalyzer, beat_callback _beatCallback) {
       analyzer = _peakAnalyzer;
+      onBeatCallback = _beatCallback;
       numBeats = 0;
     }
     
@@ -47,12 +58,18 @@ class BeatAnalyzer {
         boolean doDetectBeat = (millis() - timer > BEAT_WAIT_INTERVAL);
         if(doDetectBeat && peak > beatCutoff && peak > BEAT_MIN && peak > avgPeak) {
           // got beat //
-          Serial.print("BEAT: ");
-          Serial.println(peak);
+//          Serial.print("BEAT: ");
+//          Serial.println(peak);
           numBeats++;
+          
+          beatInfo.numBeats = numBeats;
+          beatInfo.lastPeak = peak;
             
           // slightly increase beat threshold //
           beatCutoff = peak * 1.1;
+          
+          // call callback //
+          (*onBeatCallback)(beatInfo);
             
           // reset timer //
           timer = millis();
@@ -75,16 +92,38 @@ class BeatAnalyzer {
       return n;
     }
     
+    void calculateBPM(bpm_changed_callback bpmCallback) {
+      if(((millis() - lastBpmTime) / 1000) > BPMCalculateDelay) {
+        uint16_t lastBpm = bpm;
+        bpm = numBeats / (millis() / 1000);
+        if(bpm != lastBpm) {
+          fadeTime = ((bpm / 60) * 1000) / 6;
+          Serial.print("BPM: "); Serial.println(bpm);
+          Serial.print("Fade time: "); Serial.println(fadeTime);
+          bpmCallback(bpm, fadeTime);
+//          lerp.setup(idleColor, peakColor, fadeTime, true);
+        }
+          lastBpmTime = millis();
+      }
+    }
+    
    private:
       AudioAnalyzePeak* analyzer;
       float avgPeak;
       float peakRunningTotal = 0.0;
       int numFramesCounted = 0;
       long timer = 0;
-      int numBeats;
       
       float beatCutoff = 0.5;
       long beatTime = 0;
+      beat_callback onBeatCallback;
+      
+      // bpm calculation //
+      const uint8_t BPMCalculateDelay = 12; // number of seconds to wait before counting bpm
+      uint16_t fadeTime;                    // some fraction of the time between beats -- allow enough time to fade in and out before next beat
+      uint16_t bpm = 120;
+      int numBeats = 0;
+      long lastBpmTime = 0;
 };
 
 
