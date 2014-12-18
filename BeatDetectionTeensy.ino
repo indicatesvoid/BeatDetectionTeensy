@@ -10,16 +10,35 @@
 #include "Lerp.h"
 #include "Utils.h"
 
+// modes //
+typedef enum Modes {
+  SCAN,
+  ALL_ON,
+  SUNRISE,
+  BEAT
+} Modes;
+Modes mode;
+
+#define BTN_PIN 12
+uint8_t btnState = 0;
+
 // anim/lerp settings //
 #define DEF_TIME_IN 250
 #define DEF_TIME_OUT 2000
-#define PING_PONG true
-#define LOOP false
+#define LERP_PING_PONG true
+#define LERP_LOOP false
+#define TEST_LENGTH 2
+#define TEST_MOVE_SPEED 200
+
+#define SUNRISE_DURATION 10000
 
 // colors //
 Color_t idleColor = Color_t(255,255,255);
 Color_t peakColor = Color_t(255,32,0);
+Color_t sunriseStartColor = Color_t(128,0,255);
+Color_t sunriseEndColor = Color_t(255,200,0);
 ColorLerper lerp;
+ColorLerper sunriseLerp;
 
 // led setup //
 const int ledsPerPin = 8;
@@ -92,9 +111,16 @@ void setup() {
   setGlobalColor(idleColor.r, idleColor.g, idleColor.b, &leds);
   lerp.setup(idleColor, peakColor, DEF_TIME_IN, DEF_TIME_OUT, PING_PONG, LOOP);
   lerp.pause();
+  
+  sunriseLerp.setup(sunriseStartColor, sunriseEndColor, SUNRISE_DURATION, SUNRISE_DURATION, false, false);
+  sunriseLerp.pause();
 
   // init serial //   
   Serial.begin(9600);
+  
+  // setup btn //
+  pinMode(BTN_PIN, INPUT);
+  mode = SCAN;
   
   // turn on onboard led to signal successful completion of setup //
   digitalWrite(13, HIGH);
@@ -113,14 +139,76 @@ Color_t getLerpedColor(Color_t start, Color_t end, float pct) {
   return c;
 }
 
+uint16_t testStripPosition = 0;
+long testLastMoveTime = 0;
+
 void loop() {
   beatAnalyzer.update();
   lerp.update();
   
-  if(lerp.isLerping()) {
-    Color_t c = lerp.getLerpedColor();
-    setGlobalColor(c.r, c.g, c.b, &leds);
+  Color_t c;
+  switch(mode) {
+    case SCAN:
+      if(millis() - testLastMoveTime > TEST_MOVE_SPEED) {
+        // animate a test strip across the length of the strip, and back again
+        setGlobalColor(0,0,0,&leds);
+        for(size_t i = testStripPosition; i < TEST_LENGTH + testStripPosition; i++) {
+          leds.setPixel(i, 255, 255, 255);
+        }
+        leds.show();
+        testLastMoveTime = millis();
+        testStripPosition = (testStripPosition + 1) < ledsPerPin ? testStripPosition + 1 : 0;
+      }
+      break;
+     case ALL_ON:
+       // handle when button is pressed (do not need to constantly refresh)
+       break;
+     case SUNRISE:
+       sunriseLerp.update();
+       if(sunriseLerp.isLerping()) {
+         c = sunriseLerp.getLerpedColor();
+         setGlobalColor(c.r, c.g, c.b, &leds);
+       }
+       break;
+     case BEAT:
+       if(lerp.isLerping()) {
+          c = lerp.getLerpedColor();
+          setGlobalColor(c.r, c.g, c.b, &leds);
+        }
+        break;
+     default:
+        break;
   }
+  
+  uint8_t lastBtnState = btnState;
+  btnState = digitalRead(BTN_PIN);
+  
+  if(btnState == LOW && btnState != lastBtnState) {
+    switch(mode) {
+      case SCAN:
+        mode = ALL_ON;
+        setGlobalColor(255,255,255,&leds);
+        break;
+       case ALL_ON:
+         mode = SUNRISE;
+//         setGlobalColor(sunriseStartColor.r, sunriseStartColor.g, sunriseStartColor.b, &leds);
+         setGlobalColor(0,255,0,&leds);
+         sunriseLerp.start();
+         break;
+       case SUNRISE:
+         sunriseLerp.pause();
+         mode = BEAT;
+         break;
+       case BEAT:
+         mode = SCAN;
+         setGlobalColor(0,0,0,&leds);
+         break;
+    }
+    
+    Serial.print("current mode: ");
+    Serial.println(mode);
+  }
+  
   
 //  if(lerpValue != lastLerpValue) {
 //    Color_t c = getLerpedColor(idleColor, peakColor, lerpValue);

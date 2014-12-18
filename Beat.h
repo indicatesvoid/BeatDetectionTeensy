@@ -107,6 +107,10 @@ class BeatAnalyzer {
       }
     }
     
+    boolean gotBeat() {
+      return (numBeats > 0);
+    }
+    
    private:
       AudioAnalyzePeak* analyzer;
       float avgPeak;

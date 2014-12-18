@@ -28,7 +28,6 @@ class Lerper {
       bLoop = loop;
       bReverse = false;
       bPingPong = pingPong;
-      
 //      Serial.println("TEST: ");
 //      Serial.print("255 lerped to 0 by 0.5: ");
 //      Serial.println(lerpUint(255, 0, 0.5));
