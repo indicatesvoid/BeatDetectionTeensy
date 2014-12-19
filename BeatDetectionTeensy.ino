@@ -4,7 +4,7 @@
 #include <Wire.h>
 #include <SPI.h>
 #include <SD.h>
-#include <OctoWS2811.h>
+#include <FastLED.h>    
 #include "Beat.h"
 #include "Colors.h"
 #include "Lerp.h"
@@ -27,7 +27,7 @@ uint8_t btnState = 0;
 #define DEF_TIME_OUT 2000
 #define LERP_PING_PONG true
 #define LERP_LOOP false
-#define TEST_LENGTH 2
+#define TEST_LENGTH 10
 #define TEST_MOVE_SPEED 200
 
 #define SUNRISE_DURATION 10000
@@ -40,16 +40,10 @@ Color_t sunriseEndColor = Color_t(255,200,0);
 ColorLerper lerp;
 ColorLerper sunriseLerp;
 
-// led setup //
-const int ledsPerPin = 8;
-// allocate display memory in the lower-level stack
-// (for quicker access via DMA), the *6 being some 
-// sort of magic number I can't find any info on
-// (2 bytes per color channel?)
-DMAMEM int displayMemory[ledsPerPin*6];
-int drawingMemory[ledsPerPin*6];
-const int ledConfig = WS2811_GRB | WS2811_800kHz;
-OctoWS2811 leds(ledsPerPin, displayMemory, drawingMemory, ledConfig);
+// led vars //
+#define NUM_LEDS 2000
+#define LED_DATA_PIN 0
+CRGB leds[NUM_LEDS];
 
 // audio setup //
 AudioInputI2S            i2s1;           //xy=200,69
@@ -107,9 +101,10 @@ void setup() {
   sgtl5000_1.volume(0.5);
   
   // init leds //
-  leds.begin();
-  setGlobalColor(idleColor.r, idleColor.g, idleColor.b, &leds);
-  lerp.setup(idleColor, peakColor, DEF_TIME_IN, DEF_TIME_OUT, PING_PONG, LOOP);
+  FastLED.addLeds<NEOPIXEL,LED_DATA_PIN>(leds, NUM_LEDS);
+  
+  setGlobalColor(idleColor.r, idleColor.g, idleColor.b);
+  lerp.setup(idleColor, peakColor, DEF_TIME_IN, DEF_TIME_OUT, LERP_PING_PONG, LERP_LOOP);
   lerp.pause();
   
   sunriseLerp.setup(sunriseStartColor, sunriseEndColor, SUNRISE_DURATION, SUNRISE_DURATION, false, false);
@@ -151,13 +146,13 @@ void loop() {
     case SCAN:
       if(millis() - testLastMoveTime > TEST_MOVE_SPEED) {
         // animate a test strip across the length of the strip, and back again
-        setGlobalColor(0,0,0,&leds);
+        setGlobalColor(0,0,0);
         for(size_t i = testStripPosition; i < TEST_LENGTH + testStripPosition; i++) {
-          leds.setPixel(i, 255, 255, 255);
+          leds[i].setRGB(255, 255, 255);
         }
-        leds.show();
+        FastLED.show();
         testLastMoveTime = millis();
-        testStripPosition = (testStripPosition + 1) < ledsPerPin ? testStripPosition + 1 : 0;
+        testStripPosition = (testStripPosition + 1) < NUM_LEDS ? testStripPosition + 1 : 0;
       }
       break;
      case ALL_ON:
@@ -167,13 +162,13 @@ void loop() {
        sunriseLerp.update();
        if(sunriseLerp.isLerping()) {
          c = sunriseLerp.getLerpedColor();
-         setGlobalColor(c.r, c.g, c.b, &leds);
+         setGlobalColor(c.r, c.g, c.b);
        }
        break;
      case BEAT:
        if(lerp.isLerping()) {
           c = lerp.getLerpedColor();
-          setGlobalColor(c.r, c.g, c.b, &leds);
+          setGlobalColor(c.r, c.g, c.b);
         }
         break;
      default:
@@ -187,12 +182,12 @@ void loop() {
     switch(mode) {
       case SCAN:
         mode = ALL_ON;
-        setGlobalColor(255,255,255,&leds);
+        setGlobalColor(255,255,255);
         break;
        case ALL_ON:
          mode = SUNRISE;
 //         setGlobalColor(sunriseStartColor.r, sunriseStartColor.g, sunriseStartColor.b, &leds);
-         setGlobalColor(0,255,0,&leds);
+         setGlobalColor(0,255,0);
          sunriseLerp.start();
          break;
        case SUNRISE:
@@ -201,7 +196,7 @@ void loop() {
          break;
        case BEAT:
          mode = SCAN;
-         setGlobalColor(0,0,0,&leds);
+         setGlobalColor(0,0,0);
          break;
     }
     

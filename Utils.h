@@ -1,20 +1,22 @@
 #ifndef UTILS_H
 #define UTILS_H
 
-//#include <OctoWS2811.h>
-
-static void setGlobalColor(unsigned int color, OctoWS2811* leds) {
-  for(size_t i = 0; i < leds->numPixels(); i++) {
-    leds->setPixel(i, color);
+static void setGlobalColor(unsigned int color) {
+  CRGB* leds = FastLED.leds();
+  uint16_t numLeds = FastLED.size();
+  for(size_t i = 0; i < numLeds; i++) {
+    leds[i] = color;
   }
-  leds->show();
+  FastLED.show();
 }
 
-static void setGlobalColor(uint8_t r, uint8_t g, uint8_t b, OctoWS2811* leds) {
-  for(size_t i = 0; i < leds->numPixels(); i++) {
-    leds->setPixel(i, r, g, b);
+static void setGlobalColor(uint8_t r, uint8_t g, uint8_t b) {
+  CRGB* leds = FastLED.leds();
+  uint16_t numLeds = FastLED.size();
+  for(size_t i = 0; i < numLeds; i++) {
+    leds[i].setRGB(r, g, b);
   }
-  leds->show();
+  FastLED.show();
 }
 
 #endif
