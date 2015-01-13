@@ -13,6 +13,9 @@
 // modes //
 typedef enum Modes {
   SCAN,
+  PULSE,
+  PULSE_SLOW,
+  RANDOM,
   ALL_ON,
   SUNRISE,
   BEAT
@@ -28,7 +31,7 @@ uint8_t btnState = 0;
 #define LERP_PING_PONG true
 #define LERP_LOOP false
 #define TEST_LENGTH 2
-#define TEST_MOVE_SPEED 200
+#define TEST_MOVE_SPEED 1
 
 #define SUNRISE_DURATION 10000
 
@@ -40,8 +43,16 @@ Color_t sunriseEndColor = Color_t(255,200,0);
 ColorLerper lerp;
 ColorLerper sunriseLerp;
 
+Color_t pulseStartColor = Color_t(0,0,0);
+Color_t pulseEndColor = Color_t(0,64,255);
+#define PULSE_FAST_DURATION 50
+#define PULSE_SLOW_DURATION 5000
+ColorLerper pulseLerp;
+ColorLerper pulseSlowLerp;
+
 // led setup //
-const int ledsPerPin = 8;
+const int ledsPerPin = 288;
+const uint8_t pinsUsed = 5;
 // allocate display memory in the lower-level stack
 // (for quicker access via DMA), the *6 being some 
 // sort of magic number I can't find any info on
@@ -108,12 +119,19 @@ void setup() {
   
   // init leds //
   leds.begin();
-  setGlobalColor(idleColor.r, idleColor.g, idleColor.b, &leds);
-  lerp.setup(idleColor, peakColor, DEF_TIME_IN, DEF_TIME_OUT, PING_PONG, LOOP);
+//  setGlobalColor(idleColor.r, idleColor.g, idleColor.b, &leds);
+  setGlobalColor(0,0,0, &leds);
+  lerp.setup(idleColor, peakColor, DEF_TIME_IN, DEF_TIME_OUT, LERP_PING_PONG, LERP_LOOP);
   lerp.pause();
   
   sunriseLerp.setup(sunriseStartColor, sunriseEndColor, SUNRISE_DURATION, SUNRISE_DURATION, false, false);
   sunriseLerp.pause();
+  
+  pulseLerp.setup(pulseStartColor, pulseEndColor, PULSE_FAST_DURATION, PULSE_FAST_DURATION, true, true);
+  pulseLerp.pause();
+  
+  pulseSlowLerp.setup(pulseStartColor, pulseEndColor, PULSE_SLOW_DURATION, PULSE_SLOW_DURATION, true, true);
+  pulseSlowLerp.pause();
 
   // init serial //   
   Serial.begin(9600);
@@ -140,6 +158,7 @@ Color_t getLerpedColor(Color_t start, Color_t end, float pct) {
 }
 
 uint16_t testStripPosition = 0;
+uint16_t lastTestStripPosition = 0;
 long testLastMoveTime = 0;
 
 void loop() {
@@ -147,19 +166,59 @@ void loop() {
   lerp.update();
   
   Color_t c;
+  #define NUM_RAND_INDICES 144
+  uint16_t randomIndices[NUM_RAND_INDICES];
+  
   switch(mode) {
     case SCAN:
       if(millis() - testLastMoveTime > TEST_MOVE_SPEED) {
         // animate a test strip across the length of the strip, and back again
-        setGlobalColor(0,0,0,&leds);
+//        setGlobalColor(0,0,0,&leds);
+        for(size_t i = lastTestStripPosition; i < TEST_LENGTH + lastTestStripPosition; i++) {
+          leds.setPixel(i, 0, 0, 0);
+        }
+        
         for(size_t i = testStripPosition; i < TEST_LENGTH + testStripPosition; i++) {
           leds.setPixel(i, 255, 255, 255);
         }
         leds.show();
         testLastMoveTime = millis();
-        testStripPosition = (testStripPosition + 1) < ledsPerPin ? testStripPosition + 1 : 0;
+        lastTestStripPosition = testStripPosition;
+        testStripPosition = (testStripPosition + 1) < (ledsPerPin*pinsUsed) ? testStripPosition + 1 : 0;
       }
       break;
+     case PULSE:
+       pulseLerp.update();
+       if(pulseLerp.isLerping()) {
+         c = pulseLerp.getLerpedColor();
+         setGlobalColor(c.r, c.g, c.b, &leds);
+       }
+       break;
+     case PULSE_SLOW:
+       pulseSlowLerp.update();
+       if(pulseSlowLerp.isLerping()) {
+         c = pulseSlowLerp.getLerpedColor();
+         setGlobalColor(c.r, c.g, c.b, &leds);
+       }
+       break;
+     case RANDOM:
+       // light up random group of LEDS
+       for(size_t i = 0; i < NUM_RAND_INDICES; i++) {
+         // last random set off, first
+         leds.setPixel(randomIndices[i], 0, 0, 0);
+         // now generate a new set of random indices...
+         randomIndices[i] = random(0, ledsPerPin * pinsUsed);
+         // light new random index
+         
+       }
+       
+       for(size_t i = 0; i < NUM_RAND_INDICES; i++) {
+         leds.setPixel(randomIndices[i], 255, 255, 255);
+       }
+       
+       leds.show();
+       
+       break;
      case ALL_ON:
        // handle when button is pressed (do not need to constantly refresh)
        break;
@@ -186,18 +245,32 @@ void loop() {
   if(btnState == LOW && btnState != lastBtnState) {
     switch(mode) {
       case SCAN:
-        mode = ALL_ON;
-        setGlobalColor(255,255,255,&leds);
+        mode = PULSE;
+        setGlobalColor(0,0,0, &leds);
+        pulseLerp.start();
         break;
+      case PULSE:
+        mode = PULSE_SLOW;
+        pulseSlowLerp.start();
+        setGlobalColor(0,0,0,&leds);
+        break;
+       case PULSE_SLOW:
+         mode = RANDOM;
+         setGlobalColor(0,0,0, &leds);
+         break;
+       case RANDOM:
+         mode = ALL_ON;
+         setGlobalColor(255,255,255, &leds);
+         break;
        case ALL_ON:
          mode = SUNRISE;
-//         setGlobalColor(sunriseStartColor.r, sunriseStartColor.g, sunriseStartColor.b, &leds);
-         setGlobalColor(0,255,0,&leds);
+         setGlobalColor(sunriseStartColor.r, sunriseStartColor.g, sunriseStartColor.b, &leds);
+//         setGlobalColor(0,255,0,&leds);
          sunriseLerp.start();
          break;
        case SUNRISE:
          sunriseLerp.pause();
-         mode = BEAT;
+         mode = SCAN;
          break;
        case BEAT:
          mode = SCAN;
