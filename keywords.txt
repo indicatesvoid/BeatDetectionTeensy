@@ -1,0 +1,4 @@
+BeatAnalyzer	KEYWORD1
+beat_callback	KEYWORD2
+getNumBeats		KEYWORD2
+gotBeat			KEYWORD2
