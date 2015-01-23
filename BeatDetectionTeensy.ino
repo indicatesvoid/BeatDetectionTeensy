@@ -10,15 +10,25 @@
 #include "Lerp.h"
 #include "Utils.h"
 
+#define HWSERIAL Serial1
+#define PACKET_SIZE 4
+
+typedef enum Opcode {
+    SET_MODE = 0xFF,
+    SET_MODE_PARAMETER = 0x01, // second byte will define parameter, following 1-2 bytes for value
+    SET_COLOR = 0x0C,
+    SET_BRIGHTNESS = 0x0B,
+    SET_TIME = 0x02,
+} Opcode;
+
 // modes //
 typedef enum Modes {
-  SCAN,
-  PULSE,
-  PULSE_SLOW,
-  RANDOM,
-  ALL_ON,
-  SUNRISE,
-  BEAT
+  SCAN = 0x01,
+  PULSE = 0x02,
+  STRESS_TEST = 0x03,
+  ALL_ON = 0x04,
+  SUNRISE = 0x05,
+  BEAT = 0x06
 } Modes;
 Modes mode;
 
@@ -36,6 +46,7 @@ uint8_t btnState = 0;
 #define SUNRISE_DURATION 10000
 
 // colors //
+Color_t selectedColor = Color_t(255,255,255);
 Color_t idleColor = Color_t(255,255,255);
 Color_t peakColor = Color_t(255,32,0);
 Color_t sunriseStartColor = Color_t(128,0,255);
@@ -45,10 +56,8 @@ ColorLerper sunriseLerp;
 
 Color_t pulseStartColor = Color_t(0,0,0);
 Color_t pulseEndColor = Color_t(0,64,255);
-#define PULSE_FAST_DURATION 50
-#define PULSE_SLOW_DURATION 5000
+#define PULSE_DURATION 1000
 ColorLerper pulseLerp;
-ColorLerper pulseSlowLerp;
 
 // led setup //
 const int ledsPerPin = 288;
@@ -107,6 +116,33 @@ void onBpmChanged(int bpm, int fadeTime) {
   lerp.pause();
 }
 
+/*** MODE SET FUNCTIONS **/
+void setupMode(Modes _m, Color_t _c = selectedColor) {
+  switch(_m) {
+    case ALL_ON:
+      setGlobalColor(_c.r, _c.g, _c.b, &leds);
+      mode = ALL_ON;
+      break;
+    case PULSE:
+      mode = PULSE;
+      setGlobalColor(0,0,0, &leds);
+      pulseLerp.setup(Color_t(0,0,0), _c, PULSE_DURATION, PULSE_DURATION, true, true);
+      pulseLerp.start();
+      break;
+    case SCAN:
+      mode = SCAN;
+      setGlobalColor(0,0,0, &leds);
+      break;
+    case STRESS_TEST:
+      mode = STRESS_TEST;
+      setGlobalColor(0,0,0, &leds);
+      break;
+    default:
+      break;
+  }
+}     
+/** END MODE SET FUNCTIONS **/
+
 void setup() {
   // Audio connections require memory to work.  For more
   // detailed information, see the MemoryAndCpuUsage example
@@ -121,24 +157,27 @@ void setup() {
   leds.begin();
 //  setGlobalColor(idleColor.r, idleColor.g, idleColor.b, &leds);
   setGlobalColor(0,0,0, &leds);
+//  setGlobalColor(selectedColor.r, selectedColor.b, selectedColor.g, &leds);
   lerp.setup(idleColor, peakColor, DEF_TIME_IN, DEF_TIME_OUT, LERP_PING_PONG, LERP_LOOP);
   lerp.pause();
   
   sunriseLerp.setup(sunriseStartColor, sunriseEndColor, SUNRISE_DURATION, SUNRISE_DURATION, false, false);
   sunriseLerp.pause();
   
-  pulseLerp.setup(pulseStartColor, pulseEndColor, PULSE_FAST_DURATION, PULSE_FAST_DURATION, true, true);
+  pulseLerp.setup(pulseStartColor, pulseEndColor, PULSE_DURATION, PULSE_DURATION, true, true);
   pulseLerp.pause();
-  
-  pulseSlowLerp.setup(pulseStartColor, pulseEndColor, PULSE_SLOW_DURATION, PULSE_SLOW_DURATION, true, true);
-  pulseSlowLerp.pause();
 
   // init serial //   
   Serial.begin(9600);
   
+  // init hardware serial for BLE //
+  HWSERIAL.begin(57600);
+  
   // setup btn //
   pinMode(BTN_PIN, INPUT);
-  mode = SCAN;
+
+  mode = ALL_ON;
+  setupMode(mode);
   
   // turn on onboard led to signal successful completion of setup //
   digitalWrite(13, HIGH);
@@ -165,6 +204,44 @@ void loop() {
   beatAnalyzer.update();
   lerp.update();
   
+  // handle BLE serial input //
+  if(HWSERIAL.available() >= PACKET_SIZE) {
+    byte serialData[PACKET_SIZE];
+    for(size_t i = 0; i < PACKET_SIZE; i++) {
+      serialData[i] = HWSERIAL.read();
+    }
+    
+    switch(serialData[0]) {
+      case SET_MODE:
+        switch(serialData[1]) {
+          case ALL_ON:
+            setupMode(ALL_ON, selectedColor);
+            break;
+          case SCAN:
+            setupMode(SCAN);
+            break;
+          case PULSE:
+            setupMode(PULSE);
+            break;
+          case STRESS_TEST:
+            setupMode(STRESS_TEST);
+            break;
+          default:
+            break;
+        }
+        break;
+      case SET_COLOR:
+        selectedColor.r = serialData[1];
+        selectedColor.g = serialData[2];
+        selectedColor.b = serialData[3];
+        setupMode(mode);
+        break;
+      default:
+        break;    
+    }
+  }
+  
+  // handle current mode //
   Color_t c;
   #define NUM_RAND_INDICES 144
   uint16_t randomIndices[NUM_RAND_INDICES];
@@ -179,7 +256,7 @@ void loop() {
         }
         
         for(size_t i = testStripPosition; i < TEST_LENGTH + testStripPosition; i++) {
-          leds.setPixel(i, 255, 255, 255);
+          leds.setPixel(i, selectedColor.r, selectedColor.g, selectedColor.b);
         }
         leds.show();
         testLastMoveTime = millis();
@@ -194,14 +271,7 @@ void loop() {
          setGlobalColor(c.r, c.g, c.b, &leds);
        }
        break;
-     case PULSE_SLOW:
-       pulseSlowLerp.update();
-       if(pulseSlowLerp.isLerping()) {
-         c = pulseSlowLerp.getLerpedColor();
-         setGlobalColor(c.r, c.g, c.b, &leds);
-       }
-       break;
-     case RANDOM:
+     case STRESS_TEST:
        // light up random group of LEDS
        for(size_t i = 0; i < NUM_RAND_INDICES; i++) {
          // last random set off, first
@@ -213,7 +283,7 @@ void loop() {
        }
        
        for(size_t i = 0; i < NUM_RAND_INDICES; i++) {
-         leds.setPixel(randomIndices[i], 255, 255, 255);
+         leds.setPixel(randomIndices[i], selectedColor.r, selectedColor.g, selectedColor.b);
        }
        
        leds.show();
@@ -239,42 +309,29 @@ void loop() {
         break;
   }
   
+  /** handle momentary button press **/
   uint8_t lastBtnState = btnState;
   btnState = digitalRead(BTN_PIN);
   
   if(btnState == LOW && btnState != lastBtnState) {
     switch(mode) {
       case SCAN:
-        mode = PULSE;
-        setGlobalColor(0,0,0, &leds);
-        pulseLerp.start();
+        // move to pulse mode //
+        setupMode(PULSE, selectedColor);
         break;
       case PULSE:
-        mode = PULSE_SLOW;
-        pulseSlowLerp.start();
-        setGlobalColor(0,0,0,&leds);
+        // move to stress test mode //
+        setupMode(STRESS_TEST, selectedColor);
         break;
-       case PULSE_SLOW:
-         mode = RANDOM;
-         setGlobalColor(0,0,0, &leds);
-         break;
-       case RANDOM:
-         mode = ALL_ON;
-         setGlobalColor(255,255,255, &leds);
+       case STRESS_TEST:
+         // move to all on mode //
+         setupMode(ALL_ON, selectedColor);
          break;
        case ALL_ON:
-         mode = SUNRISE;
-         setGlobalColor(sunriseStartColor.r, sunriseStartColor.g, sunriseStartColor.b, &leds);
-//         setGlobalColor(0,255,0,&leds);
-         sunriseLerp.start();
+         // move to scan mode //
+         setupMode(SCAN, selectedColor);
          break;
-       case SUNRISE:
-         sunriseLerp.pause();
-         mode = SCAN;
-         break;
-       case BEAT:
-         mode = SCAN;
-         setGlobalColor(0,0,0,&leds);
+       default:
          break;
     }
     
