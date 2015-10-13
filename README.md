@@ -1,5 +1,13 @@
 ####Teensy Beat Detection
 
+## Important Note
+This was a quick experiment and isn't necessarily pristine, guaranteed, or fully vetted. I hope to get around to polishing it up a bit in the future, but it is currently on hold.
+
+There are a number of improvements (API improvements, FFT support, etc) in the works but not present on this repo.
+
+Please note that the 'lib' branch contains the most up-to-date code here.
+
+## Description
 This example uses the Teensy's built in audio libraries to do a simple form of beat detection.
 
 The 'BeatAnalyzer' class (found in Beat.h) takes a reference to an AudioAnalyzePeak object in its constructor. It then calculates a running average of the song's peak intensity, comparing that against the current peak intensity. If it finds a beat, it simply logs out to the Serial console. A beat is only considered valid if it meets the following criteria:
